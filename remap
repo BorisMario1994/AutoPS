@@ -1,0 +1,21 @@
+$driveMappings = @{
+    "HDDA" = "F"
+    "HDDB" = "G"
+    "HDDC" = "H"
+    "HDDD" = "I"
+}
+
+foreach ($prefix in $driveMappings.Keys) {
+    $desiredLetter = $driveMappings[$prefix]
+
+    $vol = Get-Volume | Where-Object { $_.FileSystemLabel -like "$prefix*" }
+
+    foreach ($v in $vol) {
+        if ($v.DriveLetter -ne $desiredLetter) {
+            $part = Get-Partition | Where-Object { $_.DriveLetter -eq $v.DriveLetter }
+            if ($part) {
+                Set-Partition -DriveLetter $v.DriveLetter -NewDriveLetter $desiredLetter -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}

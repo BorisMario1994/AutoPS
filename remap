@@ -1,21 +1,57 @@
 $driveMappings = @{
-    "HDDA" = "F"
-    "HDDB" = "G"
-    "HDDC" = "H"
-    "HDDD" = "I"
+    "SAP"     = "G"
+    "HOKINDA" = "E"
 }
+
+# Auto-elevate if not running as Administrator
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $arguments = "& '" + $myinvocation.mycommand.definition + "'"
+    Start-Process powershell -Verb runAs -ArgumentList $arguments
+    exit
+}
+
 
 foreach ($prefix in $driveMappings.Keys) {
     $desiredLetter = $driveMappings[$prefix]
 
-    $vol = Get-Volume | Where-Object { $_.FileSystemLabel -like "$prefix*" }
+    $volumes = Get-Volume | Where-Object { $_.FileSystemLabel -match "^$prefix" }
 
-    foreach ($v in $vol) {
+    foreach ($v in $volumes) {
+        if ($v.DriveLetter -eq "C") {
+            Write-Host "Skipping system drive ($($v.DriveLetter):)"
+            continue
+        }
+
         if ($v.DriveLetter -ne $desiredLetter) {
-            $part = Get-Partition | Where-Object { $_.DriveLetter -eq $v.DriveLetter }
-            if ($part) {
-                Set-Partition -DriveLetter $v.DriveLetter -NewDriveLetter $desiredLetter -ErrorAction SilentlyContinue
+            Write-Host "Changing drive letter from $($v.DriveLetter): to $desiredLetter for volume $($v.FileSystemLabel)"
+
+            $existingPart = Get-Partition | Where-Object { $_.DriveLetter -eq $desiredLetter }
+            if ($existingPart) {
+                try {
+                    Remove-PartitionAccessPath -DiskNumber $existingPart.DiskNumber -PartitionNumber $existingPart.PartitionNumber -AccessPath "${desiredLetter}:" -ErrorAction Stop
+                    Start-Sleep -Seconds 1
+                    $volObj = Get-Volume -DriveLetter $desiredLetter -ErrorAction SilentlyContinue
+                    if ($volObj) {
+                        $volObj | Set-Volume -DriveLetter $null
+                    }
+                    Write-Host "Successfully unassigned $desiredLetter."
+                } catch {
+                    Write-Host "Failed to unassign ${desiredLetter}: $($_.Exception.Message)"
+                    continue
+                }
             }
+
+            $part = Get-Partition -Volume $v
+            if ($part) {
+                try {
+                    Set-Partition -DiskNumber $part.DiskNumber -PartitionNumber $part.PartitionNumber -NewDriveLetter $desiredLetter -ErrorAction Stop
+                    Write-Host "Drive letter changed successfully."
+                } catch {
+                    Write-Host "Failed to change drive letter: $($_.Exception.Message)"
+                }
+            }
+        } else {
+            Write-Host "Drive letter $desiredLetter is already correctly assigned to $($v.FileSystemLabel)."
         }
     }
 }
